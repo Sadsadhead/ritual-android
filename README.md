@@ -5,6 +5,18 @@
 пошаговый runner, таймер, историю, AI-форму, визуальный редактор с блок-схемой и
 безопасный ввод реквизитов YandexGPT прямо на экране создания.
 
+## Стек
+
+![Kotlin 2.2](https://img.shields.io/badge/Kotlin-2.2-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
+![Android SDK 36](https://img.shields.io/badge/Android-SDK_36-3DDC84?style=for-the-badge&logo=android&logoColor=white)
+![Jetpack Compose](https://img.shields.io/badge/Jetpack_Compose-2024.10-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)
+![Material 3](https://img.shields.io/badge/Material_3-UI-6750A4?style=for-the-badge&logo=materialdesign&logoColor=white)
+![Coroutines](https://img.shields.io/badge/Coroutines-1.9-0095D5?style=for-the-badge&logo=kotlin&logoColor=white)
+![CameraX](https://img.shields.io/badge/CameraX-1.5-34A853?style=for-the-badge&logo=android&logoColor=white)
+![DataStore](https://img.shields.io/badge/DataStore-Preferences-4285F4?style=for-the-badge&logo=android&logoColor=white)
+![YandexGPT](https://img.shields.io/badge/YandexGPT-API-FFCC00?style=for-the-badge&logo=yandexcloud&logoColor=black)
+![Gradle](https://img.shields.io/badge/Gradle-9.6-02303A?style=for-the-badge&logo=gradle&logoColor=white)
+
 Редактор поддерживает создание блоков разных типов, открытие настроек блока нажатием
 и перестановку долгим перетаскиванием. Доступны действие, информация, чек-лист,
 условие, одиночный и множественный выбор, таймер, предупреждение, фото-проверка и финал.
