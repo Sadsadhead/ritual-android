@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,18 +21,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
-import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -41,8 +44,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -54,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -64,6 +66,7 @@ import ru.ritual.app.ui.theme.Ink
 import ru.ritual.app.ui.theme.Lime
 import ru.ritual.app.domain.model.GeneratedChecklist
 import ru.ritual.app.domain.model.GenerationCharacter
+import ru.ritual.app.ui.components.MarkdownText
 
 @Composable
 fun AiScreen(
@@ -83,7 +86,6 @@ fun AiScreen(
     var prompt by rememberSaveable { mutableStateOf("") }
     var detail by rememberSaveable { mutableIntStateOf(1) }
     var characterIndex by rememberSaveable { mutableIntStateOf(0) }
-    var characterMenuExpanded by remember { mutableStateOf(false) }
     var apiKey by rememberSaveable { mutableStateOf("") }
     var folderId by rememberSaveable { mutableStateOf("") }
     var keyVisible by rememberSaveable { mutableStateOf(false) }
@@ -116,20 +118,28 @@ fun AiScreen(
             )
             .padding(horizontal = 16.dp),
     ) {
-        Box(
-            modifier = Modifier.clip(RoundedCornerShape(9.dp)).background(Lime).padding(8.dp),
-            contentAlignment = Alignment.Center,
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                .background(Brush.linearGradient(listOf(Ink, Color(0xFF34364A))))
+                .padding(16.dp),
         ) {
-            Icon(Icons.Outlined.AutoAwesome, null, tint = Ink)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(Lime), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.AutoAwesome, null, tint = Ink)
+                }
+                Spacer(Modifier.size(11.dp))
+                Column {
+                    Text("Создать из идеи", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+                    Text("YandexGPT · проектирование и проверка", style = MaterialTheme.typography.labelMedium, color = Lime)
+                }
+            }
+            Spacer(Modifier.height(11.dp))
+            Text(
+                "Опишите результат — ИИ спроектирует этапы, развилки, предупреждения и проверит маршрут.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(.68f),
+            )
         }
-        Spacer(Modifier.height(10.dp))
-        Text("Создать из идеи", style = MaterialTheme.typography.headlineLarge)
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "Опишите бытовую задачу обычными словами — приложение превратит её в понятный маршрут.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onBackground.copy(.62f),
-        )
         Spacer(Modifier.height(14.dp))
         if (!hasYandexCredentials) {
             Column(
@@ -217,56 +227,33 @@ fun AiScreen(
             onValueChange = { prompt = it },
             label = { Text("Что нужно сделать?") },
             placeholder = { Text("Например: собрать чемодан на три дня у моря…") },
-            minLines = 4,
-            shape = RoundedCornerShape(11.dp),
+            minLines = 5,
+            leadingIcon = { Text("✦", style = MaterialTheme.typography.titleLarge, color = Ink) },
+            shape = RoundedCornerShape(15.dp),
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(13.dp))
-        Text("Характер генерации", style = MaterialTheme.typography.titleLarge)
+        Text("Характер", style = MaterialTheme.typography.titleLarge)
+        Text("Меняет структуру, тон и глубину результата", style = MaterialTheme.typography.bodySmall, color = Ink.copy(.5f))
         Spacer(Modifier.height(7.dp))
-        val character = GenerationCharacter.entries[characterIndex]
-        Box {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .clickable { characterMenuExpanded = true }
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(character.title, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        character.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(.58f),
-                    )
-                }
-                Icon(Icons.Outlined.ExpandMore, "Выбрать характер")
-            }
-            DropdownMenu(
-                expanded = characterMenuExpanded,
-                onDismissRequest = { characterMenuExpanded = false },
-                modifier = Modifier.fillMaxWidth(.88f),
-            ) {
-                GenerationCharacter.entries.forEachIndexed { index, item ->
-                    DropdownMenuItem(
-                        text = {
-                            Column {
-                                Text(item.title, style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    item.description,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(.58f),
-                                )
-                            }
-                        },
-                        onClick = {
-                            characterIndex = index
-                            characterMenuExpanded = false
-                        },
-                    )
+        val characterColors = listOf(Lime, Color(0xFFFFD7A8), Color(0xFFBFD9FF), Color(0xFFFFD2DC), Color(0xFFC9F0DD), Color(0xFFD9CEFF))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            itemsIndexed(GenerationCharacter.entries) { index, item ->
+                val selected = characterIndex == index
+                Column(
+                    Modifier.width(156.dp).height(116.dp).clip(RoundedCornerShape(14.dp))
+                        .background(if (selected) characterColors[index] else MaterialTheme.colorScheme.surface)
+                        .then(if (selected) Modifier.border(2.dp, Ink, RoundedCornerShape(14.dp)) else Modifier)
+                        .clickable { characterIndex = index }
+                        .padding(11.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(item.symbol, style = MaterialTheme.typography.titleLarge, color = Ink)
+                        Spacer(Modifier.size(7.dp))
+                        Text(item.title, style = MaterialTheme.typography.titleMedium, color = Ink)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(item.description, style = MaterialTheme.typography.bodySmall, color = Ink.copy(.6f), maxLines = 3)
                 }
             }
         }
@@ -274,7 +261,7 @@ fun AiScreen(
         Text("Насколько подробно?", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(7.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("Кратко", "Оптимально", "Подробно").forEachIndexed { index, label ->
+            listOf("Кратко\n4–6", "Оптимально\n7–9", "Подробно\n10–14").forEachIndexed { index, label ->
                 val selected = detail == index
                 Text(
                     label,
@@ -285,7 +272,7 @@ fun AiScreen(
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (selected) Ink else MaterialTheme.colorScheme.surface)
                         .clickable { detail = index }
-                        .padding(vertical = 10.dp),
+                        .padding(vertical = 9.dp),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
             }
@@ -340,9 +327,17 @@ fun AiScreen(
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Lime.copy(.45f)).padding(12.dp)) {
                 Text("ЧЕРНОВИК ГОТОВ", style = MaterialTheme.typography.labelMedium, color = Ink.copy(.6f))
                 Spacer(Modifier.height(6.dp))
-                Text(generatedChecklist.title, style = MaterialTheme.typography.headlineMedium, color = Ink)
+                Text("${generatedChecklist.symbol} ${generatedChecklist.title}", style = MaterialTheme.typography.headlineMedium, color = Ink)
                 Spacer(Modifier.height(5.dp))
                 Text("${generatedChecklist.steps.size} шагов · ~${generatedChecklist.estimatedDurationMinutes} мин", style = MaterialTheme.typography.bodyMedium, color = Ink.copy(.62f))
+                if (generatedChecklist.description.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    MarkdownText(generatedChecklist.description, style = MaterialTheme.typography.bodyMedium, color = Ink.copy(.72f))
+                }
+                val branches = generatedChecklist.steps.count { it.type == "YES_NO" || it.type == "SINGLE_CHOICE" }
+                val warnings = generatedChecklist.steps.count { it.type == "WARNING" }
+                Spacer(Modifier.height(8.dp))
+                Text("◇ $branches развилок   ⚠ $warnings предупреждений", style = MaterialTheme.typography.labelLarge, color = Ink.copy(.62f))
                 Spacer(Modifier.height(14.dp))
                 Button(
                     onClick = onEditDraft,

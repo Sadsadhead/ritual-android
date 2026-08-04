@@ -16,7 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
@@ -41,7 +41,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import ru.ritual.app.ui.screens.AiScreen
-import ru.ritual.app.ui.screens.HistoryScreen
+import ru.ritual.app.ui.screens.ScheduleScreen
 import ru.ritual.app.ui.screens.HomeScreen
 import ru.ritual.app.ui.screens.RunnerScreen
 import ru.ritual.app.ui.screens.SettingsScreen
@@ -51,13 +51,20 @@ private data class Destination(val route: String, val label: String, val icon: I
 
 private val bottomDestinations = listOf(
     Destination("home", "Главная", Icons.Outlined.Home),
-    Destination("history", "История", Icons.Outlined.History),
+    Destination("schedule", "Расписание", Icons.Outlined.CalendarMonth),
     Destination("ai", "Создать", Icons.Outlined.AutoAwesome),
     Destination("settings", "Настройки", Icons.Outlined.Settings),
 )
 
 @Composable
-fun RitualApp(viewModel: AppViewModel, state: AppUiState) {
+fun RitualApp(
+    viewModel: AppViewModel,
+    state: AppUiState,
+    requestedAlgorithmId: String? = null,
+    requestedDestination: String? = null,
+    launchRequestToken: Long = 0L,
+    onLaunchConsumed: () -> Unit = {},
+) {
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
@@ -67,6 +74,19 @@ fun RitualApp(viewModel: AppViewModel, state: AppUiState) {
         state.keyMessage?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.consumeMessage()
+        }
+    }
+
+    LaunchedEffect(launchRequestToken, state.checklists) {
+        when {
+            requestedAlgorithmId != null && state.checklists.any { it.id == requestedAlgorithmId } -> {
+                navController.navigate("runner/$requestedAlgorithmId") { launchSingleTop = true }
+                onLaunchConsumed()
+            }
+            requestedDestination in bottomDestinations.map(Destination::route) -> {
+                navController.navigateSingleTop(requestedDestination!!)
+                onLaunchConsumed()
+            }
         }
     }
 
@@ -106,13 +126,16 @@ fun RitualApp(viewModel: AppViewModel, state: AppUiState) {
                 composable("home") {
                     HomeScreen(
                         state = state,
-                        categories = viewModel.categories,
                         checklists = viewModel.filteredChecklists(),
+                        recentChecklistIds = viewModel.recentChecklistIds(),
                         onQueryChange = viewModel::updateQuery,
-                        onCategoryClick = viewModel::selectCategory,
                         onChecklistClick = { navController.navigate("runner/$it") },
                         onChecklistEdit = { navController.navigate("editor/$it") },
                         onChecklistDelete = viewModel::deleteChecklist,
+                        onChecklistFavorite = viewModel::toggleChecklistFavorite,
+                        onChecklistDuplicate = viewModel::duplicateChecklist,
+                        onActiveRunClick = { navController.navigate("runner/$it") },
+                        onFinishAllRuns = viewModel::finishAllRuns,
                         onAiClick = { navController.navigateSingleTop("ai") },
                         onCreateClick = {
                             viewModel.clearGeneratedChecklist()
@@ -120,7 +143,21 @@ fun RitualApp(viewModel: AppViewModel, state: AppUiState) {
                         },
                     )
                 }
-                composable("history") { HistoryScreen(viewModel.history) }
+                composable("schedule") {
+                    ScheduleScreen(
+                        items = state.scheduleItems,
+                        algorithms = state.checklists,
+                        preferences = state.preferences,
+                        isImprovingWithAi = state.isImprovingScheduleItem,
+                        aiSuggestion = state.scheduleAiSuggestion,
+                        aiError = state.scheduleAiError,
+                        onSave = viewModel::saveScheduleItem,
+                        onDelete = viewModel::deleteScheduleItem,
+                        onRunAlgorithm = { navController.navigate("runner/$it") },
+                        onImproveWithAi = viewModel::improveScheduleItem,
+                        onClearAi = viewModel::clearScheduleAiSuggestion,
+                    )
+                }
                 composable("ai") {
                     AiScreen(
                         hasYandexCredentials = state.hasYandexCredentials,
@@ -149,6 +186,26 @@ fun RitualApp(viewModel: AppViewModel, state: AppUiState) {
                         onAutoPlayVideoNotesChange = viewModel::setAutoPlayVideoNotes,
                         generationNotifications = state.preferences.generationNotifications,
                         onGenerationNotificationsChange = viewModel::setGenerationNotifications,
+                        calendarWeekStartsMonday = state.preferences.calendarWeekStartsMonday,
+                        onCalendarWeekStartsMondayChange = viewModel::setCalendarWeekStartsMonday,
+                        calendarDefaultView = state.preferences.calendarDefaultView,
+                        onCalendarDefaultViewChange = viewModel::setCalendarDefaultView,
+                        calendarShowNotes = state.preferences.calendarShowNotes,
+                        onCalendarShowNotesChange = viewModel::setCalendarShowNotes,
+                        calendarOfferSystemExport = state.preferences.calendarOfferSystemExport,
+                        onCalendarOfferSystemExportChange = viewModel::setCalendarOfferSystemExport,
+                        showActiveRunOnHome = state.preferences.showActiveRunOnHome,
+                        onShowActiveRunOnHomeChange = viewModel::setShowActiveRunOnHome,
+                        showProgressRange = state.preferences.showProgressRange,
+                        onShowProgressRangeChange = viewModel::setShowProgressRange,
+                        confirmBeforeStopping = state.preferences.confirmBeforeStopping,
+                        onConfirmBeforeStoppingChange = viewModel::setConfirmBeforeStopping,
+                        compactAlgorithmCards = state.preferences.compactAlgorithmCards,
+                        onCompactAlgorithmCardsChange = viewModel::setCompactAlgorithmCards,
+                        calendarShowWeekNumbers = state.preferences.calendarShowWeekNumbers,
+                        onCalendarShowWeekNumbersChange = viewModel::setCalendarShowWeekNumbers,
+                        calendarHighlightCurrentWeek = state.preferences.calendarHighlightCurrentWeek,
+                        onCalendarHighlightCurrentWeekChange = viewModel::setCalendarHighlightCurrentWeek,
                     )
                 }
                 composable("runner/{id}") { entry ->
@@ -157,10 +214,31 @@ fun RitualApp(viewModel: AppViewModel, state: AppUiState) {
                     if (checklist != null) {
                         RunnerScreen(
                             checklist = checklist,
+                            initialStepIndex = state.activeRuns
+                                .firstOrNull { it.algorithmId == checklist.id }
+                                ?.currentStepIndex
+                                ?: 0,
+                            initialVisitedStepIds = state.activeRuns
+                                .firstOrNull { it.algorithmId == checklist.id }
+                                ?.visitedStepIds
+                                .orEmpty(),
                             tapNavigation = state.preferences.tapNavigation,
                             keepScreenAwake = state.preferences.keepScreenAwake,
                             autoPlayVideoNotes = state.preferences.autoPlayVideoNotes,
-                            onClose = navController::popBackStack,
+                            showProgressRange = state.preferences.showProgressRange,
+                            confirmBeforeStopping = state.preferences.confirmBeforeStopping,
+                            suggestions = viewModel.recommendationsFor(checklist.id),
+                            onSuggestionClick = { suggestedId ->
+                                viewModel.finishRun(checklist.id)
+                                navController.popBackStack()
+                                navController.navigate("runner/$suggestedId")
+                            },
+                            onRunProgress = { index, visited -> viewModel.updateRun(checklist, index, visited) },
+                            onNavigateHome = navController::popBackStack,
+                            onClose = {
+                                viewModel.finishRun(checklist.id)
+                                navController.popBackStack()
+                            },
                         )
                     }
                 }
@@ -170,13 +248,27 @@ fun RitualApp(viewModel: AppViewModel, state: AppUiState) {
                         isGeneratingMetadata = state.isGeneratingMetadata,
                         metadataTarget = state.metadataTarget,
                         metadataSuggestion = state.metadataSuggestion,
+                        isImprovingAlgorithm = state.isImprovingAlgorithm,
+                        improvementStage = state.improvementStage,
+                        improvementOriginal = state.improvementOriginal,
+                        improvementProposal = state.improvementProposal,
+                        improvementError = state.improvementError,
                         onRequestMetadata = viewModel::requestMetadata,
                         onConsumeMetadataSuggestion = viewModel::consumeMetadataSuggestion,
+                        onImprove = viewModel::improveChecklist,
+                        onDiscardImprovement = viewModel::discardImprovement,
+                        onAcceptImprovement = {
+                            viewModel.acceptImprovement()
+                            navController.popBackStack()
+                        },
                         onSave = {
                             viewModel.saveChecklist(it)
                             navController.popBackStack()
                         },
-                        onClose = navController::popBackStack,
+                        onClose = {
+                            viewModel.discardImprovement()
+                            navController.popBackStack()
+                        },
                     )
                 }
                 composable("editor/{id}") { entry ->
@@ -188,13 +280,27 @@ fun RitualApp(viewModel: AppViewModel, state: AppUiState) {
                             isGeneratingMetadata = state.isGeneratingMetadata,
                             metadataTarget = state.metadataTarget,
                             metadataSuggestion = state.metadataSuggestion,
+                            isImprovingAlgorithm = state.isImprovingAlgorithm,
+                            improvementStage = state.improvementStage,
+                            improvementOriginal = state.improvementOriginal,
+                            improvementProposal = state.improvementProposal,
+                            improvementError = state.improvementError,
                             onRequestMetadata = viewModel::requestMetadata,
                             onConsumeMetadataSuggestion = viewModel::consumeMetadataSuggestion,
+                            onImprove = viewModel::improveChecklist,
+                            onDiscardImprovement = viewModel::discardImprovement,
+                            onAcceptImprovement = {
+                                viewModel.acceptImprovement()
+                                navController.popBackStack()
+                            },
                             onSave = {
                                 viewModel.saveChecklist(it)
                                 navController.popBackStack()
                             },
-                            onClose = navController::popBackStack,
+                            onClose = {
+                                viewModel.discardImprovement()
+                                navController.popBackStack()
+                            },
                         )
                     }
                 }

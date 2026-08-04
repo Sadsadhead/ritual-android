@@ -1,135 +1,125 @@
 # Алгоритмы
 
-Нативное Android-приложение для локальных пошаговых бытовых инструкций. Текущий MVP
-показывает дизайн-систему, библиотеку демонстрационных чек-листов, поиск и фильтры,
-пошаговый runner, таймер, историю, AI-форму, визуальный редактор с блок-схемой и
-безопасный ввод реквизитов YandexGPT прямо на экране создания.
+Нативное Android-приложение для создания, планирования и пошагового выполнения личных алгоритмов и чек-листов. Приложение работает локально, поддерживает ветвящиеся сценарии, медиа-заметки, таймеры, расписание и генерацию инструкций с помощью YandexGPT.
 
-## Стек
-
-![Kotlin 2.2](https://img.shields.io/badge/Kotlin-2.2-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
-![Android SDK 36](https://img.shields.io/badge/Android-SDK_36-3DDC84?style=for-the-badge&logo=android&logoColor=white)
+![Android](https://img.shields.io/badge/Android-SDK_36-3DDC84?style=for-the-badge&logo=android&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-2.2-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
 ![Jetpack Compose](https://img.shields.io/badge/Jetpack_Compose-2024.10-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)
-![Material 3](https://img.shields.io/badge/Material_3-UI-6750A4?style=for-the-badge&logo=materialdesign&logoColor=white)
-![Coroutines](https://img.shields.io/badge/Coroutines-1.9-0095D5?style=for-the-badge&logo=kotlin&logoColor=white)
+![Material 3](https://img.shields.io/badge/Material_3-6750A4?style=for-the-badge&logo=materialdesign&logoColor=white)
 ![CameraX](https://img.shields.io/badge/CameraX-1.5-34A853?style=for-the-badge&logo=android&logoColor=white)
-![DataStore](https://img.shields.io/badge/DataStore-Preferences-4285F4?style=for-the-badge&logo=android&logoColor=white)
 ![YandexGPT](https://img.shields.io/badge/YandexGPT-API-FFCC00?style=for-the-badge&logo=yandexcloud&logoColor=black)
 ![Gradle](https://img.shields.io/badge/Gradle-9.6-02303A?style=for-the-badge&logo=gradle&logoColor=white)
 
-Редактор поддерживает создание блоков разных типов, открытие настроек блока нажатием
-и перестановку долгим перетаскиванием. Доступны действие, информация, чек-лист,
-условие, одиночный и множественный выбор, таймер, предупреждение, фото-проверка и финал.
-К блокам можно прикреплять заметки, фото, видео, аудио и файлы.
+## Возможности
 
-AI-генерация использует Yandex Cloud Text Generation API и модель YandexGPT.
-Сгенерированный алгоритм сначала открывается как редактируемый черновик. Каждый шаг
-поддерживает описание, личную заметку, фото, видеокружок, аудио и файл.
+- библиотека алгоритмов с поиском, избранным, дублированием и историей запусков;
+- визуальный редактор последовательностей и ветвлений;
+- информационные шаги, предупреждения, чек-листы, выбор вариантов, условия и таймеры;
+- пошаговый runner с восстановлением активного запуска и расчётом прогресса по фактическому маршруту;
+- фото, видеокружки, аудиозаметки и файлы, прикреплённые к шагам;
+- фоновые таймеры и уведомления о важных этапах выполнения;
+- календарное расписание с повторениями, напоминаниями и запуском связанного алгоритма;
+- виджеты главного экрана для алгоритмов и расписания;
+- генерация новых алгоритмов через YandexGPT;
+- AI-улучшение существующих алгоритмов, метаданных и пунктов расписания с предпросмотром изменений;
+- Markdown в описаниях шагов;
+- настраиваемые навигация, отображение прогресса, поведение экрана и календаря.
 
-## Безопасность API-ключа
+## Как устроен алгоритм
 
-- API-ключ сервисного аккаунта и ID каталога вводятся только в приложении;
-- реквизиты шифруются `AES/GCM/NoPadding`;
+Алгоритм состоит из шагов и переходов между ними. Обычный шаг ведёт к следующему, а условный выбирает ветку по ответу пользователя. Движок учитывает посещённые узлы, защищается от циклов и показывает диапазон прогресса, если точная длина маршрута ещё неизвестна.
+
+Поддерживаемые типы шагов:
+
+| Тип | Назначение |
+| --- | --- |
+| `Information` | Текстовая инструкция |
+| `Warning` | Важное предупреждение |
+| `Checkbox` | Действие или список подпунктов |
+| `YesNo` | Выбор «да / нет» |
+| `SingleChoice` | Один вариант из списка |
+| `MultipleChoice` | Несколько вариантов |
+| `Timer` | Шаг с обратным отсчётом |
+| `Final` | Завершение сценария |
+
+## YandexGPT
+
+AI-функции используют Yandex Cloud Text Generation API. Пользователь вводит API-ключ сервисного аккаунта и ID каталога в настройках приложения. Сгенерированный результат всегда открывается как черновик: его можно проверить и отредактировать до сохранения.
+
+Ответ модели проходит локальную проверку:
+
+- обязательных полей и идентификаторов;
+- целей переходов и достижимости шагов;
+- корректности ветвлений;
+- отсутствия недопустимых циклов;
+- допустимых типов шагов и вариантов ответа.
+
+Для реального использования рекомендуется отдельный сервисный аккаунт с минимальной ролью `yc.ai.languageModels.execute`, ограниченным сроком действия ключа и лимитом расходов.
+
+## Безопасность и хранение данных
+
+- алгоритмы, расписание, история и настройки хранятся локально;
+- API-ключ и ID каталога не добавляются в исходники, ресурсы, `BuildConfig` или логи;
+- реквизиты Yandex Cloud шифруются через `AES/GCM/NoPadding`;
 - ключ шифрования создаётся в `AndroidKeyStore` и не экспортируется;
-- зашифрованная строка хранится в Preferences DataStore;
-- ключ не попадает в исходники, ресурсы, `BuildConfig`, логи или экспорт;
-- backup приложения отключён, DataStore исключён из device transfer;
-- в настройках есть полное удаление реквизитов и Keystore entry.
+- зашифрованные данные сохраняются в Preferences DataStore;
+- резервное копирование приложения отключено;
+- реквизиты и запись Android Keystore можно полностью удалить из настроек.
 
-Для production рекомендуется небольшой backend. Локальный режим следует использовать
-с отдельным API-ключом сервисного аккаунта Yandex Cloud, ограниченным областью
-`yc.ai.languageModels.execute`, сроком действия и лимитом расходов.
+Локальное хранение защищает ключ от случайной публикации, но не гарантирует безопасность на root-устройстве. Для production-сценария предпочтителен собственный backend-прокси.
 
-## Структура
+## Технологии
+
+| Область | Технологии |
+| --- | --- |
+| Язык и runtime | Kotlin 2.2, Java 17, Coroutines 1.9 |
+| UI | Jetpack Compose, Material 3, Navigation Compose |
+| Состояние | Android ViewModel, Compose state |
+| Локальные данные | Preferences DataStore, JSON-сериализация |
+| Камера и медиа | CameraX, MediaRecorder, FileProvider |
+| Фоновые задачи | Foreground services, AlarmManager, BroadcastReceiver |
+| Интеграции | Yandex Cloud Text Generation API |
+| Виджеты | Android App Widgets, RemoteViews |
+| Сборка и тесты | Gradle 9.6.1, Android Gradle Plugin 9.2, JUnit 4 |
+
+## Структура проекта
 
 ```text
 app/src/main/java/ru/ritual/app/
-├── data/
-│   ├── ChecklistRepository.kt
-│   └── security/SecureApiKeyStore.kt
-├── domain/model/Checklist.kt
+├── data/               # локальные репозитории, активные запуски и статистика
+│   ├── network/        # клиент YandexGPT
+│   └── security/       # защищённое хранение реквизитов
+├── domain/model/       # алгоритмы, граф переходов и расписание
+├── media/              # фото, видео, аудио и файловые заметки
+├── notification/       # уведомления, alarms и фон AI-генерации
+├── timer/              # foreground service таймера
 ├── ui/
-│   ├── components/ChecklistCard.kt
-│   ├── screens/
-│   ├── theme/Theme.kt
-│   ├── AppViewModel.kt
-│   └── RitualApp.kt
+│   ├── components/     # переиспользуемые Compose-компоненты
+│   ├── screens/        # главная, редактор, runner, AI, расписание и настройки
+│   └── theme/          # тема приложения
+├── widget/             # виджеты алгоритмов и расписания
 └── MainActivity.kt
 ```
 
-Направление зависимостей: `presentation → domain ← data`. В дальнейшей декомпозиции
-эти границы переводятся в модули `core:model`, `core:domain`, `core:data`, `core:ui`,
-`core:database`, `core:network`, а экраны — в `feature:*`.
+Основное направление зависимостей: `UI → domain ← data`. Экранное состояние и пользовательские действия координирует `AppViewModel`.
 
-## Навигация
+## Требования
 
-Нижний уровень: `Главная → История → Создать с ИИ → Настройки`.
-Runner открывается полноэкранно через `runner/{checklistId}`.
-
-## Контракт движка выполнения
-
-```kotlin
-interface ChecklistExecutionEngine {
-    fun validate(graph: ChecklistGraph): ValidationReport
-    fun start(graph: ChecklistGraph): ExecutionState
-    fun submit(state: ExecutionState, answer: StepAnswer): TransitionResult
-    fun goBack(state: ExecutionState): TransitionResult
-    fun calculateProgress(state: ExecutionState): Float
-}
-```
-
-Движок должен сортировать правила по приоритету, вычислять AND/OR-группы, защищаться
-от циклов, отбрасывать ответы недоступной ветки и считать прогресс по рассчитанному
-маршруту, а не по общему числу узлов.
-
-## JSON для AI
-
-```json
-{
-  "title": "Название",
-  "description": "Описание",
-  "category": "Дом",
-  "tags": ["быстро"],
-  "estimatedDurationMinutes": 10,
-  "startStepId": "step_1",
-  "steps": [
-    {
-      "id": "step_1",
-      "title": "Первый шаг",
-      "description": "Что сделать",
-      "type": "CHECKBOX",
-      "isRequired": true,
-      "options": [],
-      "checklistItems": ["Первый подпункт", "Второй подпункт"],
-      "defaultNextStepId": "step_2"
-    }
-  ],
-  "transitions": [],
-  "warnings": []
-}
-```
-
-Ответ AI проходит десериализацию, проверку идентификаторов, целей переходов,
-достижимости и циклов. Сохранение допускается только после предпросмотра пользователем.
-Условные шаги переходят дальше сразу после выбора варианта. Обычный шаг может содержать
-собственный список подпунктов, которые отмечаются независимо во время выполнения.
-Запущенный таймер работает через foreground service после сворачивания приложения.
-Системные уведомления и звуковые сигналы срабатывают за 5 минут, за 1 минуту и по
-окончании отсчёта; Android 13+ запрашивает разрешение на уведомления при первом запуске.
-
-## План развития
-
-1. Room, редактор и локальная история.
-2. Типы ответов, граф переходов и unit-тесты движка.
-3. CameraX, аудио/видео и файловое хранилище.
-4. YandexGPT Text Generation API, JSON-ответ, валидация и предпросмотр.
-5. SAF-импорт/экспорт с checksum и защитой от path traversal.
-
-Ключевые риски: сложность миграций графа, восстановление динамического runner,
-очистка общих медиа, ограничения фоновых таймеров Android и компрометация ключа
-на root-устройстве.
+- Android Studio с JDK 17;
+- Android SDK 36;
+- устройство или эмулятор с Android 8.0 (API 26) или новее.
 
 ## Сборка
+
+```bash
+git clone https://github.com/Sadsadhead/ritual-android.git
+cd ritual-android
+./gradlew :app:assembleDebug
+```
+
+Готовый APK появится в `app/build/outputs/apk/debug/app-debug.apk`.
+
+На macOS можно явно использовать JDK из Android Studio:
 
 ```bash
 JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
@@ -137,4 +127,23 @@ ANDROID_HOME="$HOME/Library/Android/sdk" \
 ./gradlew :app:assembleDebug
 ```
 
-APK: `app/build/outputs/apk/debug/app-debug.apk`.
+## Тесты
+
+```bash
+./gradlew :app:testDebugUnitTest
+```
+
+Unit-тесты покрывают вычисление маршрутов графа и формирование повторяющихся событий расписания.
+
+## Разрешения Android
+
+Приложение запрашивает только разрешения, необходимые выбранным функциям:
+
+- `INTERNET` — запросы к YandexGPT;
+- `CAMERA` и `RECORD_AUDIO` — медиа-заметки;
+- `POST_NOTIFICATIONS` — таймеры, активные алгоритмы и расписание;
+- `SCHEDULE_EXACT_ALARM` — точные напоминания;
+- `RECEIVE_BOOT_COMPLETED` — восстановление расписания после перезагрузки;
+- foreground service — таймер и длительная AI-генерация.
+
+Камера объявлена необязательной, поэтому приложение может устанавливаться на устройства без неё.

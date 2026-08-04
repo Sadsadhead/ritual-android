@@ -14,6 +14,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.snapping.SnapPosition
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
@@ -34,6 +37,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.horizontalScroll
@@ -54,6 +58,7 @@ import androidx.compose.material.icons.outlined.ForkRight
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.StopCircle
@@ -62,7 +67,7 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.Done
+import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Button
@@ -83,6 +88,8 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Immutable
@@ -90,11 +97,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -102,14 +111,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.zIndex
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import kotlinx.coroutines.launch
@@ -132,9 +145,11 @@ import ru.ritual.app.ui.theme.Sky
 import ru.ritual.app.domain.model.GeneratedChecklist
 import ru.ritual.app.domain.model.AlgorithmMetadataSuggestion
 import ru.ritual.app.domain.model.MetadataTarget
+import ru.ritual.app.domain.model.inferBranchPlacements
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import kotlin.math.roundToInt
 
 private enum class AttachmentKind(val label: String) {
     Photo("Фото"), VideoCircle("Видео"), Audio("Аудио"), File("Файл")
@@ -169,16 +184,23 @@ private data class BlockType(
 
 private data class BranchPlacement(val conditionId: String, val optionIndex: Int)
 
+@Immutable
+private data class FlowDropTarget(
+    val key: String,
+    val conditionId: String? = null,
+    val optionIndex: Int? = null,
+    val anchorStepId: String? = null,
+    val afterAnchor: Boolean = true,
+)
+
 private val blockTypes = listOf(
     BlockType("Действие", "✓", "Обычный шаг с подтверждением", Sky),
     BlockType("Информация", "i", "Текст, инструкция или пояснение", Sky),
     BlockType("Чек-лист", "☑", "Несколько независимо отмечаемых пунктов", Lime),
     BlockType("Условие · Да / Нет", "◇", "Мгновенный переход после ответа", Lavender),
     BlockType("Один вариант", "○", "Выбор одного варианта", Lavender),
-    BlockType("Несколько вариантов", "◉", "Можно отметить несколько ответов", Lavender),
     BlockType("Таймер", "◷", "Фоновый отсчёт с уведомлениями", Apricot),
     BlockType("Предупреждение", "!", "Важная информация перед действием", Apricot),
-    BlockType("Фото-проверка", "▣", "Шаг с фото или файлом результата", Sky),
     BlockType("Финал", "■", "Завершение алгоритма", Lime),
 )
 
@@ -189,8 +211,16 @@ fun EditorScreen(
     isGeneratingMetadata: Boolean = false,
     metadataTarget: MetadataTarget? = null,
     metadataSuggestion: AlgorithmMetadataSuggestion? = null,
+    isImprovingAlgorithm: Boolean = false,
+    improvementStage: String? = null,
+    improvementOriginal: Checklist? = null,
+    improvementProposal: GeneratedChecklist? = null,
+    improvementError: String? = null,
     onRequestMetadata: (String, String, List<String>, MetadataTarget) -> Unit = { _, _, _, _ -> },
     onConsumeMetadataSuggestion: () -> Unit = {},
+    onImprove: (Checklist, String) -> Unit = { _, _ -> },
+    onDiscardImprovement: () -> Unit = {},
+    onAcceptImprovement: () -> Unit = {},
     onSave: (Checklist) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -200,6 +230,9 @@ fun EditorScreen(
     var showTypePicker by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
     var showValidationError by remember { mutableStateOf(false) }
+    var previewChecklist by remember { mutableStateOf<Checklist?>(null) }
+    var pendingImprovement by remember { mutableStateOf<Checklist?>(null) }
+    var improvementPreferences by rememberSaveable { mutableStateOf("") }
     var pendingBranchPlacement by remember { mutableStateOf<BranchPlacement?>(null) }
     var algorithmTitle by remember(initialChecklist, existingChecklist) {
         mutableStateOf(initialChecklist?.title ?: existingChecklist?.title.orEmpty())
@@ -232,6 +265,7 @@ fun EditorScreen(
                         kind = if (step.checklistItems.isNotEmpty()) "Чек-лист" else step.type.toEditorLabel(),
                         accent = when {
                             step.type == "FINAL" -> Lime
+                            step.type == "WARNING" -> Apricot
                             step.type == "YES_NO" || step.type.contains("CHOICE") -> Lavender
                             index % 2 == 0 -> Sky
                             else -> Apricot
@@ -297,6 +331,21 @@ fun EditorScreen(
         onConsumeMetadataSuggestion()
     }
 
+    if (improvementOriginal != null && improvementProposal != null) {
+        ImprovementReviewScreen(
+            original = improvementOriginal,
+            proposal = improvementProposal,
+            onDismiss = onDiscardImprovement,
+            onAccept = onAcceptImprovement,
+        )
+        return
+    }
+
+    previewChecklist?.let { preview ->
+        RunnerScreen(checklist = preview, onClose = { previewChecklist = null })
+        return
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -308,17 +357,32 @@ fun EditorScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onClose) { Icon(Icons.Outlined.Close, "Закрыть") }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    if (existingChecklist == null) "НОВЫЙ АЛГОРИТМ" else "РЕДАКТИРОВАНИЕ",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onBackground.copy(.5f),
-                )
-                Text("Редактор", style = MaterialTheme.typography.titleLarge)
-            }
+            Text(
+                if (existingChecklist == null) "Новый алгоритм" else existingChecklist.title,
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
             if (steps.isNotEmpty()) {
                 IconButton(onClick = { showResetDialog = true }) {
                     Icon(Icons.Outlined.DeleteSweep, "Начать заново")
+                }
+                IconButton(
+                    onClick = {
+                        previewChecklist = buildChecklist(
+                            algorithmTitle.ifBlank { "Демо алгоритма" },
+                            algorithmDescription,
+                            algorithmCategory,
+                            algorithmTags.split(',', ';').map(String::trim).map { it.removePrefix("#") }.filter(String::isNotBlank).distinct(),
+                            steps,
+                            algorithmAccent,
+                            algorithmSymbol,
+                            null,
+                        )
+                    },
+                ) {
+                    Icon(Icons.Outlined.PlayArrow, "Демо без сохранения")
                 }
             }
             IconButton(
@@ -346,6 +410,47 @@ fun EditorScreen(
                     Icon(Icons.Outlined.Check, "Сохранить", tint = Color.White, modifier = Modifier.size(18.dp))
                 }
             }
+        }
+
+        Button(
+            onClick = {
+                if (algorithmTitle.isBlank() || steps.isEmpty()) {
+                    showValidationError = true
+                } else {
+                    pendingImprovement = buildChecklist(
+                            algorithmTitle,
+                            algorithmDescription,
+                            algorithmCategory,
+                            algorithmTags.split(',', ';').map(String::trim).map { it.removePrefix("#") }.filter(String::isNotBlank).distinct(),
+                            steps,
+                            algorithmAccent,
+                            algorithmSymbol,
+                            existingChecklist?.id,
+                        )
+                }
+            },
+            enabled = steps.isNotEmpty() && !isImprovingAlgorithm,
+            colors = ButtonDefaults.buttonColors(containerColor = Lime.copy(.52f), contentColor = Ink),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp).height(46.dp),
+        ) {
+            if (isImprovingAlgorithm) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.size(7.dp))
+                Text(improvementStage ?: "Улучшаю…")
+            } else {
+                Icon(Icons.Outlined.AutoFixHigh, null, Modifier.size(18.dp))
+                Spacer(Modifier.size(7.dp))
+                Text("Улучшить с помощью ИИ")
+            }
+        }
+        if (improvementError != null) {
+            Text(
+                improvementError,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 3.dp),
+            )
         }
 
         Row(
@@ -386,21 +491,14 @@ fun EditorScreen(
                 onClassify = { onRequestMetadata(algorithmTitle, algorithmDescription, steps.map(DraftStep::title), MetadataTarget.Classification) },
                 steps = steps,
                 onEdit = { editingIndex = it },
+                onDelete = { index -> removeDraftStep(steps, index) },
                 onAdd = { showTypePicker = true },
             )
         } else {
             FlowEditor(
                 steps = steps,
                 onEdit = { editingIndex = it },
-                onMoveToBranch = { stepId, conditionId, optionIndex ->
-                    val index = steps.indexOfFirst { it.id == stepId }
-                    if (index >= 0) {
-                        steps[index] = steps[index].copy(
-                            parentConditionId = conditionId,
-                            parentOptionIndex = optionIndex,
-                        )
-                    }
-                },
+                onMove = { stepId, target -> moveDraftStep(steps, stepId, target) },
                 onDelete = { index -> removeDraftStep(steps, index) },
                 onAddToBranch = { conditionId, optionIndex ->
                     pendingBranchPlacement = BranchPlacement(conditionId, optionIndex)
@@ -443,18 +541,13 @@ fun EditorScreen(
                 steps.add(
                     insertIndex,
                     DraftStep(
-                        title = when (type.label) {
-                            "Чек-лист" -> "Новый чек-лист"
-                            "Таймер" -> "Новый таймер"
-                            "Финал" -> "Завершение"
-                            else -> "Новый блок"
-                        },
+                        title = "",
                         kind = type.label,
                         accent = type.accent,
                         checklistItems = if (type.label == "Чек-лист") listOf("") else emptyList(),
                         options = when {
                             type.label.contains("Условие") -> listOf("Да", "Нет")
-                            type.label.contains("вариант") -> listOf("Вариант 1", "Вариант 2")
+                            type.label.contains("вариант") -> listOf("", "")
                             else -> emptyList()
                         },
                         parentConditionId = placementConditionId,
@@ -492,6 +585,54 @@ fun EditorScreen(
             title = { Text("Не хватает данных") },
             text = { Text("Укажите название алгоритма и добавьте хотя бы один этап.") },
             confirmButton = { TextButton(onClick = { showValidationError = false }) { Text("Понятно") } },
+        )
+    }
+
+    pendingImprovement?.let { checklist ->
+        AlertDialog(
+            onDismissRequest = { pendingImprovement = null },
+            icon = {
+                Box(Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(Lime), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.AutoFixHigh, null, tint = Ink)
+                }
+            },
+            title = { Text("Как улучшить алгоритм?") },
+            text = {
+                Column {
+                    Text(
+                        "Пожелание можно оставить пустым — тогда YandexGPT проведёт полный аудит самостоятельно.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(.62f),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = improvementPreferences,
+                        onValueChange = { improvementPreferences = it },
+                        label = { Text("Пожелания, необязательно") },
+                        placeholder = { Text("Например: короче, больше проверок, мягче тон…") },
+                        minLines = 3,
+                        maxLines = 6,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            dismissButton = { TextButton(onClick = { pendingImprovement = null }) { Text("Отмена") } },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingImprovement = null
+                        onImprove(checklist, improvementPreferences.trim())
+                        improvementPreferences = ""
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Ink, contentColor = Color.White),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(17.dp), tint = Lime)
+                    Spacer(Modifier.size(6.dp))
+                    Text("Улучшить")
+                }
+            },
         )
     }
 
@@ -543,34 +684,32 @@ private fun removeDraftStep(steps: SnapshotStateList<DraftStep>, index: Int) {
     steps.removeAt(index)
 }
 
-private fun GeneratedChecklist.inferBranchPlacements(): Map<String, Pair<String, Int>> {
-    val byId = steps.associateBy { it.id }
-    val placements = mutableMapOf<String, Pair<String, Int>>()
-    steps.filter { it.type == "YES_NO" || it.type == "SINGLE_CHOICE" }.forEach { condition ->
-        val optionCount = condition.options.size.coerceAtLeast(2)
-        val paths = (0 until optionCount).map { optionIndex ->
-            val firstId = condition.optionNextStepIds.getOrNull(optionIndex)
-                ?: condition.defaultNextStepId.takeIf { optionIndex == 0 }
-            buildSet {
-                var currentId = firstId
-                while (currentId != null && currentId != condition.id && add(currentId)) {
-                    currentId = byId[currentId]?.defaultNextStepId
-                }
-            }
+private fun moveDraftStep(steps: SnapshotStateList<DraftStep>, stepId: String, target: FlowDropTarget) {
+    val from = steps.indexOfFirst { it.id == stepId }
+    if (from < 0 || target.conditionId == stepId || target.anchorStepId == stepId) return
+    val moved = steps.removeAt(from).copy(
+        parentConditionId = target.conditionId,
+        parentOptionIndex = target.optionIndex,
+    )
+    val insertion = if (target.conditionId != null) {
+        val lastInBranch = steps.indexOfLast {
+            it.parentConditionId == target.conditionId && (it.parentOptionIndex ?: 0) == (target.optionIndex ?: 0)
         }
-        paths.forEachIndexed { optionIndex, path ->
-            path.filter { targetId -> paths.count { targetId in it } == 1 }
-                .forEach { targetId -> placements.putIfAbsent(targetId, condition.id to optionIndex) }
-        }
+        if (lastInBranch >= 0) lastInBranch + 1
+        else (steps.indexOfFirst { it.id == target.conditionId } + 1).coerceAtLeast(0)
+    } else {
+        val anchorIndex = target.anchorStepId?.let { id -> steps.indexOfFirst { it.id == id } } ?: steps.size
+        if (anchorIndex < 0) steps.size else anchorIndex + if (target.afterAnchor) 1 else 0
     }
-    return placements
+    steps.add(insertion.coerceIn(0, steps.size), moved)
 }
 
 private fun String.toEditorLabel(): String = when (this) {
     "YES_NO" -> "Условие · Да / Нет"
     "SINGLE_CHOICE" -> "Один вариант"
-    "MULTIPLE_CHOICE" -> "Несколько вариантов"
+    "MULTIPLE_CHOICE" -> "Один вариант"
     "INFORMATION" -> "Информация"
+    "WARNING" -> "Предупреждение"
     "TIMER" -> "Таймер"
     "FINAL" -> "Финал"
     else -> "Действие"
@@ -579,8 +718,9 @@ private fun String.toEditorLabel(): String = when (this) {
 private fun StepType.toEditorLabel(): String = when (this) {
     StepType.YesNo -> "Условие · Да / Нет"
     StepType.SingleChoice -> "Один вариант"
-    StepType.MultipleChoice -> "Несколько вариантов"
+    StepType.MultipleChoice -> "Один вариант"
     StepType.Information -> "Информация"
+    StepType.Warning -> "Предупреждение"
     StepType.Timer -> "Таймер"
     StepType.Final -> "Финал"
     StepType.Checkbox -> "Действие"
@@ -613,10 +753,10 @@ private fun buildChecklist(
             title = step.title,
             description = step.description,
             type = when {
-                step.kind == "Информация" || step.kind == "Предупреждение" || step.kind == "Фото-проверка" -> StepType.Information
+                step.kind == "Предупреждение" -> StepType.Warning
+                step.kind == "Информация" -> StepType.Information
                 step.kind.contains("Условие") -> StepType.YesNo
                 step.kind == "Один вариант" -> StepType.SingleChoice
-                step.kind == "Несколько вариантов" -> StepType.MultipleChoice
                 step.kind == "Таймер" -> StepType.Timer
                 step.kind == "Финал" -> StepType.Final
                 else -> StepType.Checkbox
@@ -664,6 +804,7 @@ private fun StepsEditor(
     onClassify: () -> Unit,
     steps: SnapshotStateList<DraftStep>,
     onEdit: (Int) -> Unit,
+    onDelete: (Int) -> Unit,
     onAdd: () -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -677,6 +818,21 @@ private fun StepsEditor(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item(key = "editor-header") {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surface).padding(12.dp),
+            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(Lime), contentAlignment = Alignment.Center) {
+                    Text("✦", style = MaterialTheme.typography.titleMedium, color = Ink)
+                }
+                Spacer(Modifier.size(9.dp))
+                Column {
+                    Text("Основа алгоритма", style = MaterialTheme.typography.titleLarge)
+                    Text("Название, смысл и быстрый поиск", style = MaterialTheme.typography.bodySmall, color = Ink.copy(.5f))
+                }
+            }
+            Spacer(Modifier.height(10.dp))
             OutlinedTextField(
                 value = title,
                 onValueChange = onTitleChange,
@@ -685,11 +841,12 @@ private fun StepsEditor(
                 trailingIcon = {
                     AiFieldButton(
                         loading = isGeneratingMetadata && metadataTarget == MetadataTarget.Title,
+                        busy = isGeneratingMetadata,
                         description = "Создать название с помощью ИИ",
                         onClick = onGenerateTitle,
                     )
                 },
-                shape = RoundedCornerShape(9.dp),
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(7.dp))
@@ -702,11 +859,12 @@ private fun StepsEditor(
                 trailingIcon = {
                     AiFieldButton(
                         loading = isGeneratingMetadata && metadataTarget == MetadataTarget.Description,
+                        busy = isGeneratingMetadata,
                         description = "Создать описание с помощью ИИ",
                         onClick = onGenerateDescription,
                     )
                 },
-                shape = RoundedCornerShape(9.dp),
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(7.dp))
@@ -721,7 +879,7 @@ private fun StepsEditor(
                             Icon(Icons.Outlined.ExpandMore, "Выбрать категорию")
                         }
                     },
-                    shape = RoundedCornerShape(9.dp),
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth().clickable { categoryMenuExpanded = true },
                 )
                 DropdownMenu(
@@ -745,14 +903,15 @@ private fun StepsEditor(
                 placeholder = { Text("быстро, утро, кухня") },
                 leadingIcon = { Icon(Icons.Outlined.Tag, null) },
                 singleLine = true,
-                shape = RoundedCornerShape(9.dp),
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(7.dp))
             OutlinedButton(
                 onClick = onClassify,
                 enabled = !isGeneratingMetadata,
-                shape = RoundedCornerShape(9.dp),
+                colors = ButtonDefaults.outlinedButtonColors(containerColor = Lime.copy(.42f), contentColor = Ink),
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth().height(42.dp),
             ) {
                 if (isGeneratingMetadata && metadataTarget == MetadataTarget.Classification) {
@@ -763,6 +922,7 @@ private fun StepsEditor(
                 Spacer(Modifier.size(7.dp))
                 Text("ИИ: определить категорию и теги")
             }
+            }
             Spacer(Modifier.height(13.dp))
             Text("Содержание", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(5.dp))
@@ -770,28 +930,64 @@ private fun StepsEditor(
         }
         itemsIndexed(steps, key = { _, step -> step.id }) { index, step ->
             var dragOffset by remember(step.id) { mutableFloatStateOf(0f) }
+            val swipeOffset = remember(step.id) { Animatable(0f) }
+            val density = LocalDensity.current
+            val revealWidthPx = with(density) { 82.dp.toPx() }
             val isDragging = draggedId == step.id
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .zIndex(if (isDragging) 1f else 0f)
-                    .graphicsLayer {
-                        translationY = if (isDragging) dragOffset else 0f
-                        alpha = if (isDragging) .88f else 1f
-                        shadowElevation = if (isDragging) 12f else 0f
-                    }
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .clickable { onEdit(index) }
-                    .padding(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Box(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFFFFE8E6)),
             ) {
+                TextButton(
+                    onClick = { onDelete(index) },
+                    modifier = Modifier.align(Alignment.CenterEnd).width(82.dp).fillMaxSize(),
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFB3261E)),
+                ) {
+                    Icon(Icons.Outlined.DeleteOutline, null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.size(3.dp))
+                    Text("Удалить", style = MaterialTheme.typography.labelMedium)
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .zIndex(if (isDragging) 1f else 0f)
+                        .offset { IntOffset(swipeOffset.value.roundToInt(), 0) }
+                        .graphicsLayer {
+                            translationY = if (isDragging) dragOffset else 0f
+                            alpha = if (isDragging) .88f else 1f
+                            shadowElevation = if (isDragging) 12f else 0f
+                        }
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .draggable(
+                            orientation = Orientation.Horizontal,
+                            state = rememberDraggableState { delta ->
+                                coroutineScope.launch {
+                                    swipeOffset.snapTo((swipeOffset.value + delta).coerceIn(-revealWidthPx, 0f))
+                                }
+                            },
+                            onDragStopped = {
+                                coroutineScope.launch {
+                                    swipeOffset.animateTo(
+                                        if (swipeOffset.value < -revealWidthPx * .35f) -revealWidthPx else 0f,
+                                        spring(dampingRatio = .78f, stiffness = 520f),
+                                    )
+                                }
+                            },
+                        )
+                        .clickable {
+                            if (swipeOffset.value < 0f) coroutineScope.launch { swipeOffset.animateTo(0f) }
+                            else onEdit(index)
+                        }
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                 Box(Modifier.size(30.dp).clip(RoundedCornerShape(8.dp)).background(step.accent), contentAlignment = Alignment.Center) {
                     Text("${index + 1}", style = MaterialTheme.typography.labelMedium, color = Ink)
                 }
                 Spacer(Modifier.size(9.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(step.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(step.title.ifBlank { "Без названия" }, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(step.kind, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.52f))
                     val parent = steps.firstOrNull { it.id == step.parentConditionId }
                     if (parent != null) {
@@ -882,6 +1078,7 @@ private fun StepsEditor(
                 ) {
                     Icon(Icons.Outlined.DragIndicator, "Удерживайте и перетащите", tint = MaterialTheme.colorScheme.onSurface.copy(.55f))
                 }
+                }
             }
         }
         item(key = "editor-add") { AddStepButton(onAdd) }
@@ -889,8 +1086,8 @@ private fun StepsEditor(
 }
 
 @Composable
-private fun AiFieldButton(loading: Boolean, description: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick, enabled = !loading) {
+private fun AiFieldButton(loading: Boolean, busy: Boolean, description: String, onClick: () -> Unit) {
+    IconButton(onClick = onClick, enabled = !busy) {
         if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
         else Icon(Icons.Outlined.AutoAwesome, description, modifier = Modifier.size(19.dp))
     }
@@ -900,12 +1097,57 @@ private fun AiFieldButton(loading: Boolean, description: String, onClick: () -> 
 private fun FlowEditor(
     steps: List<DraftStep>,
     onEdit: (Int) -> Unit,
-    onMoveToBranch: (stepId: String, conditionId: String, optionIndex: Int) -> Unit,
+    onMove: (stepId: String, target: FlowDropTarget) -> Unit,
     onDelete: (Int) -> Unit,
     onAddToBranch: (conditionId: String, optionIndex: Int) -> Unit,
     onAdd: () -> Unit,
 ) {
-    var linkEditMode by remember { mutableStateOf(false) }
+    var draggedStepId by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    var dragPoint by remember { mutableStateOf(Offset.Zero) }
+    var activeTarget by remember { mutableStateOf<FlowDropTarget?>(null) }
+    val dropBounds = remember { mutableStateMapOf<FlowDropTarget, Rect>() }
+    val updateDrag: (Offset) -> Unit = { delta ->
+        dragOffset += delta
+        dragPoint += delta
+        val dragged = steps.firstOrNull { it.id == draggedStepId }
+        activeTarget = dropBounds.entries
+            .asSequence()
+            .filter { (target, _) ->
+                target.conditionId != draggedStepId &&
+                    target.anchorStepId != draggedStepId &&
+                    (dragged?.isBranchCondition() != true || target.conditionId == null)
+            }
+            .minByOrNull { (_, bounds) ->
+                val dx = when {
+                    dragPoint.x < bounds.left -> bounds.left - dragPoint.x
+                    dragPoint.x > bounds.right -> dragPoint.x - bounds.right
+                    else -> 0f
+                }
+                val dy = when {
+                    dragPoint.y < bounds.top -> bounds.top - dragPoint.y
+                    dragPoint.y > bounds.bottom -> dragPoint.y - bounds.bottom
+                    else -> 0f
+                }
+                dx * dx + dy * dy
+            }
+            ?.key
+    }
+    val finishDrag = {
+        val stepId = draggedStepId
+        val target = activeTarget
+        if (stepId != null && target != null) onMove(stepId, target)
+        draggedStepId = null
+        activeTarget = null
+        dragOffset = Offset.Zero
+        dragPoint = Offset.Zero
+    }
+    val cancelDrag = {
+        draggedStepId = null
+        activeTarget = null
+        dragOffset = Offset.Zero
+        dragPoint = Offset.Zero
+    }
     LazyColumn(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -915,17 +1157,13 @@ private fun FlowEditor(
                 Column(Modifier.weight(1f)) {
                     Text("Блок-схема", style = MaterialTheme.typography.headlineMedium)
                     Text(
-                        if (linkEditMode) "Связи разблокированы: удерживайте и переносите блоки."
-                        else "Удерживайте блок, чтобы включить редактирование связей.",
+                        if (draggedStepId != null) "Отпустите блок в подсвеченной точке."
+                        else "Удерживайте блок и перенесите его в нужный узел.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onBackground.copy(.55f),
                     )
                 }
-                if (linkEditMode) {
-                    IconButton(onClick = { linkEditMode = false }) {
-                        Icon(Icons.Outlined.Done, "Завершить редактирование", tint = Ink)
-                    }
-                } else if (steps.isNotEmpty()) {
+                if (steps.isNotEmpty()) {
                     Box(Modifier.size(30.dp).clip(RoundedCornerShape(8.dp)).background(Lime.copy(.65f)), contentAlignment = Alignment.Center) {
                         Text("${steps.size}", style = MaterialTheme.typography.labelMedium, color = Ink)
                     }
@@ -945,22 +1183,50 @@ private fun FlowEditor(
                 AddStepButton(onAdd)
             } else {
                 StartPill()
-                FlowConnector()
                 val rootSteps = steps.filter { it.parentConditionId == null }
+                FlowDropZone(
+                    target = FlowDropTarget(
+                        key = "root-start",
+                        anchorStepId = rootSteps.firstOrNull()?.id,
+                        afterAnchor = false,
+                    ),
+                    dragActive = draggedStepId != null,
+                    selected = activeTarget?.key == "root-start",
+                    onBounds = { target, bounds -> dropBounds[target] = bounds },
+                )
                 rootSteps.forEachIndexed { rootIndex, step ->
                     BranchAwareFlowNode(
                         step = step,
                         steps = steps,
                         onEdit = onEdit,
-                        onMoveToBranch = onMoveToBranch,
-                        editMode = linkEditMode,
-                        onActivateEditMode = { linkEditMode = true },
+                        draggedStepId = draggedStepId,
+                        dragOffset = dragOffset,
+                        activeTarget = activeTarget,
+                        onDragStart = { stepId, center ->
+                            draggedStepId = stepId
+                            dragOffset = Offset.Zero
+                            dragPoint = center
+                            activeTarget = null
+                        },
+                        onDrag = updateDrag,
+                        onDragEnd = finishDrag,
+                        onDragCancel = cancelDrag,
+                        onDropBounds = { target, bounds -> dropBounds[target] = bounds },
                         onDelete = onDelete,
                         onAddToBranch = onAddToBranch,
                     )
-                    if (rootIndex < rootSteps.lastIndex) FlowConnector()
+                    val target = FlowDropTarget(
+                        key = "root-after-${step.id}",
+                        anchorStepId = step.id,
+                        afterAnchor = true,
+                    )
+                    FlowDropZone(
+                        target = target,
+                        dragActive = draggedStepId != null,
+                        selected = activeTarget == target,
+                        onBounds = { dropTarget, bounds -> dropBounds[dropTarget] = bounds },
+                    )
                 }
-                FlowConnector()
                 EndPill()
                 Spacer(Modifier.height(18.dp))
                 AddStepButton(onAdd)
@@ -974,9 +1240,14 @@ private fun BranchAwareFlowNode(
     step: DraftStep,
     steps: List<DraftStep>,
     onEdit: (Int) -> Unit,
-    onMoveToBranch: (String, String, Int) -> Unit,
-    editMode: Boolean,
-    onActivateEditMode: () -> Unit,
+    draggedStepId: String?,
+    dragOffset: Offset,
+    activeTarget: FlowDropTarget?,
+    onDragStart: (String, Offset) -> Unit,
+    onDrag: (Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
+    onDropBounds: (FlowDropTarget, Rect) -> Unit,
     onDelete: (Int) -> Unit,
     onAddToBranch: (String, Int) -> Unit,
 ) {
@@ -986,7 +1257,12 @@ private fun BranchAwareFlowNode(
             step = step,
             number = index + 1,
             onClick = { onEdit(index) },
-            onLongClick = onActivateEditMode,
+            isDragging = draggedStepId == step.id,
+            dragOffset = dragOffset,
+            onDragStart = { center -> onDragStart(step.id, center) },
+            onDrag = onDrag,
+            onDragEnd = onDragEnd,
+            onDragCancel = onDragCancel,
             onDelete = { onDelete(index) },
         )
         return
@@ -995,21 +1271,31 @@ private fun BranchAwareFlowNode(
     DecisionNode(
         step = step,
         onClick = { onEdit(index) },
-        onLongClick = onActivateEditMode,
+        isDragging = draggedStepId == step.id,
+        dragOffset = dragOffset,
+        onDragStart = { center -> onDragStart(step.id, center) },
+        onDrag = onDrag,
+        onDragEnd = onDragEnd,
+        onDragCancel = onDragCancel,
         onDelete = { onDelete(index) },
     )
     BranchConnector()
     val labels = step.options.ifEmpty {
-        if (step.kind.contains("Условие")) listOf("Да", "Нет") else listOf("Вариант 1", "Вариант 2")
+        if (step.kind.contains("Условие")) listOf("Да", "Нет") else listOf("", "")
     }
     BranchOptionsCarousel(
         condition = step,
         labels = labels,
         steps = steps,
         onEdit = onEdit,
-        onMoveToBranch = onMoveToBranch,
-        editMode = editMode,
-        onActivateEditMode = onActivateEditMode,
+        draggedStepId = draggedStepId,
+        dragOffset = dragOffset,
+        activeTarget = activeTarget,
+        onDragStart = onDragStart,
+        onDrag = onDrag,
+        onDragEnd = onDragEnd,
+        onDragCancel = onDragCancel,
+        onDropBounds = onDropBounds,
         onDelete = onDelete,
         onAddToBranch = onAddToBranch,
     )
@@ -1022,9 +1308,14 @@ private fun BranchOptionsCarousel(
     labels: List<String>,
     steps: List<DraftStep>,
     onEdit: (Int) -> Unit,
-    onMoveToBranch: (String, String, Int) -> Unit,
-    editMode: Boolean,
-    onActivateEditMode: () -> Unit,
+    draggedStepId: String?,
+    dragOffset: Offset,
+    activeTarget: FlowDropTarget?,
+    onDragStart: (String, Offset) -> Unit,
+    onDrag: (Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
+    onDropBounds: (FlowDropTarget, Rect) -> Unit,
     onDelete: (Int) -> Unit,
     onAddToBranch: (String, Int) -> Unit,
 ) {
@@ -1045,19 +1336,25 @@ private fun BranchOptionsCarousel(
                 val focused = optionIndex in firstVisible..(firstVisible + 1)
                 val scale by animateFloatAsState(if (focused) 1f else .92f, label = "branch-scale")
                 Column(
-                    modifier = Modifier.width(laneWidth).graphicsLayer { scaleX = scale; scaleY = scale; alpha = if (focused) 1f else .62f },
+                    modifier = Modifier.width(laneWidth).graphicsLayer { scaleX = scale; scaleY = scale; alpha = if (focused) 1f else .62f }
+                        .then(
+                            if (draggedStepId != null) Modifier.border(
+                                1.dp,
+                                if (activeTarget?.conditionId == condition.id && activeTarget.optionIndex == optionIndex) Lime else Ink.copy(.14f),
+                                RoundedCornerShape(11.dp),
+                            ) else Modifier,
+                        ).padding(horizontal = if (draggedStepId != null) 3.dp else 0.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     BranchLabel(
-                        text = label.uppercase(),
+                        text = label.ifBlank { "Вариант ${optionIndex + 1}" }.uppercase(),
                         color = if (optionIndex == 0) Lime else Apricot,
                         modifier = Modifier.fillMaxWidth(),
                         onAdd = { onAddToBranch(condition.id, optionIndex) },
                     )
-                    FlowConnector()
                     if (branchSteps.isEmpty()) {
                         Text(
-                            if (editMode) "Перетащите сюда" else "Ветка пока пустая",
+                            "Ветка пока пустая",
                             style = MaterialTheme.typography.labelSmall,
                             textAlign = TextAlign.Center,
                             color = MaterialTheme.colorScheme.onSurface.copy(.42f),
@@ -1066,21 +1363,34 @@ private fun BranchOptionsCarousel(
                         )
                     } else {
                         branchSteps.forEachIndexed { branchIndex, child ->
-                            DraggableBranchNode(
+                            FlowNode(
                                 step = child,
-                                steps = steps,
-                                condition = condition,
-                                optionIndex = optionIndex,
-                                optionCount = labels.size,
-                                onEdit = onEdit,
-                                onMoveToBranch = onMoveToBranch,
-                                editMode = editMode,
-                                onActivateEditMode = onActivateEditMode,
-                                onDelete = onDelete,
+                                number = steps.indexOfFirst { it.id == child.id } + 1,
+                                compact = true,
+                                onClick = { onEdit(steps.indexOfFirst { it.id == child.id }) },
+                                isDragging = draggedStepId == child.id,
+                                dragOffset = dragOffset,
+                                onDragStart = { center -> onDragStart(child.id, center) },
+                                onDrag = onDrag,
+                                onDragEnd = onDragEnd,
+                                onDragCancel = onDragCancel,
+                                onDelete = { onDelete(steps.indexOfFirst { it.id == child.id }) },
                             )
                             if (branchIndex < branchSteps.lastIndex) FlowConnector()
                         }
                     }
+                    val dropTarget = FlowDropTarget(
+                        key = "branch-${condition.id}-$optionIndex",
+                        conditionId = condition.id,
+                        optionIndex = optionIndex,
+                    )
+                    FlowDropZone(
+                        target = dropTarget,
+                        dragActive = draggedStepId != null,
+                        selected = activeTarget == dropTarget,
+                        compact = true,
+                        onBounds = onDropBounds,
+                    )
                 }
             }
         }
@@ -1104,89 +1414,99 @@ private fun BranchOptionsCarousel(
 }
 
 @Composable
-private fun DraggableBranchNode(
-    step: DraftStep,
-    steps: List<DraftStep>,
-    condition: DraftStep,
-    optionIndex: Int,
-    optionCount: Int,
-    onEdit: (Int) -> Unit,
-    onMoveToBranch: (String, String, Int) -> Unit,
-    editMode: Boolean,
-    onActivateEditMode: () -> Unit,
-    onDelete: (Int) -> Unit,
-) {
-    var dragX by remember(step.id, condition.id) { mutableFloatStateOf(0f) }
-    var laneWidth by remember(step.id, condition.id) { mutableFloatStateOf(1f) }
-    var dragging by remember(step.id, condition.id) { mutableStateOf(false) }
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .zIndex(if (dragging) 2f else 0f)
-            .onGloballyPositioned { laneWidth = it.size.width.toFloat().coerceAtLeast(1f) }
-            .graphicsLayer {
-                translationX = dragX
-                alpha = if (dragging) .86f else 1f
-                shadowElevation = if (dragging) 10f else 0f
-            }
-            .then(if (editMode) Modifier.pointerInput(step.id, condition.id, optionCount) {
-                detectDragGesturesAfterLongPress(
-                    onDragStart = { dragging = true; dragX = 0f },
-                    onDragCancel = { dragging = false; dragX = 0f },
-                    onDragEnd = {
-                        val target = (optionIndex + kotlin.math.round(dragX / laneWidth).toInt())
-                            .coerceIn(0, optionCount - 1)
-                        if (target != optionIndex) onMoveToBranch(step.id, condition.id, target)
-                        dragging = false
-                        dragX = 0f
-                    },
-                    onDrag = { change, amount ->
-                        change.consume()
-                        dragX += amount.x
-                    },
-                )
-            } else Modifier),
-    ) {
-        val index = steps.indexOfFirst { it.id == step.id }
-        FlowNode(
-            step = step,
-            number = index + 1,
-            compact = true,
-            onClick = { onEdit(index) },
-            onLongClick = onActivateEditMode,
-            onDelete = { onDelete(index) },
-        )
-    }
-}
-
-@Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun FlowNode(
     step: DraftStep,
     number: Int,
     compact: Boolean = false,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    isDragging: Boolean,
+    dragOffset: Offset,
+    onDragStart: (Offset) -> Unit,
+    onDrag: (Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    var centerInRoot by remember(step.id) { mutableStateOf(Offset.Zero) }
+    val lift by animateFloatAsState(if (isDragging) 1.045f else 1f, label = "flow-node-lift")
     Box(modifier = if (compact) Modifier.fillMaxWidth() else Modifier.fillMaxWidth(.82f)) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(if (compact) 9.dp else 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(if (compact) 21.dp else 25.dp).clip(RoundedCornerShape(6.dp)).background(step.accent), contentAlignment = Alignment.Center) {
-            Text("$number", style = MaterialTheme.typography.labelMedium, color = Ink)
+        if (isDragging) {
+            Box(
+                Modifier.matchParentSize().clip(RoundedCornerShape(12.dp))
+                    .background(step.accent.copy(.13f)).border(2.dp, step.accent, RoundedCornerShape(12.dp)),
+            )
         }
-        Spacer(Modifier.size(7.dp))
-        Column(Modifier.weight(1f)) {
-            Text(step.title, style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
-            if (!compact) Text(step.kind, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.5f))
+        Box(
+            Modifier.fillMaxWidth().zIndex(if (isDragging) 8f else 0f)
+                .onGloballyPositioned { coordinates -> centerInRoot = coordinates.boundsInRoot().center }
+                .graphicsLayer {
+                    translationX = if (isDragging) dragOffset.x else 0f
+                    translationY = if (isDragging) dragOffset.y else 0f
+                    scaleX = lift
+                    scaleY = lift
+                    shadowElevation = if (isDragging) 22f else 0f
+                    rotationZ = if (isDragging) (dragOffset.x / 180f).coerceIn(-2.2f, 2.2f) else 0f
+                },
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface)
+                    .clickable(onClick = onClick)
+                    .pointerInput(step.id) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { onDragStart(centerInRoot) },
+                            onDragCancel = onDragCancel,
+                            onDragEnd = onDragEnd,
+                            onDrag = { change, amount -> change.consume(); onDrag(amount) },
+                        )
+                    }
+                    .padding(if (compact) 9.dp else 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(if (compact) 21.dp else 25.dp).clip(RoundedCornerShape(6.dp)).background(step.accent), contentAlignment = Alignment.Center) {
+                    Text("$number", style = MaterialTheme.typography.labelSmall, color = Ink)
+                }
+                Spacer(Modifier.size(7.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(step.title.ifBlank { "Без названия" }, style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    if (!compact) Text(step.kind, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.5f))
+                }
+                Spacer(Modifier.size(14.dp))
+            }
+            IconButton(onClick = onDelete, modifier = Modifier.align(Alignment.TopEnd).size(24.dp)) {
+                Icon(Icons.Outlined.Close, "Удалить блок", tint = Color(0xFFE53935), modifier = Modifier.size(14.dp))
+            }
         }
-        Spacer(Modifier.size(14.dp))
     }
-        IconButton(onClick = onDelete, modifier = Modifier.align(Alignment.TopEnd).size(24.dp)) {
-            Icon(Icons.Outlined.Close, "Удалить блок", tint = Color(0xFFE53935), modifier = Modifier.size(14.dp))
+}
+
+@Composable
+private fun FlowDropZone(
+    target: FlowDropTarget,
+    dragActive: Boolean,
+    selected: Boolean,
+    compact: Boolean = false,
+    onBounds: (FlowDropTarget, Rect) -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth(if (compact) 1f else .82f)
+            .height(if (dragActive) 34.dp else 22.dp)
+            .onGloballyPositioned { onBounds(target, it.boundsInRoot()) },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (dragActive) {
+            Box(
+                Modifier.fillMaxWidth().height(if (selected) 25.dp else 18.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (selected) Lime.copy(.72f) else MaterialTheme.colorScheme.surfaceVariant)
+                    .border(if (selected) 2.dp else 1.dp, if (selected) Ink else Ink.copy(.16f), RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Outlined.DragIndicator, "Переместить сюда", tint = Ink.copy(if (selected) .9f else .35f), modifier = Modifier.size(15.dp))
+            }
+        } else {
+            FlowConnector()
         }
     }
 }
@@ -1325,9 +1645,19 @@ private fun StepEditSheet(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item {
-                Text("Редактирование этапа", style = MaterialTheme.typography.headlineMedium)
-                Spacer(Modifier.height(5.dp))
-                Text("Текст, логика и материалы хранятся вместе с этапом.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.55f))
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(step.accent).padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)).background(Color.White.copy(.65f)), contentAlignment = Alignment.Center) {
+                        Text(blockTypes.firstOrNull { it.label == kind }?.symbol ?: "◇", style = MaterialTheme.typography.titleLarge, color = Ink)
+                    }
+                    Spacer(Modifier.size(10.dp))
+                    Column {
+                        Text("Этап", style = MaterialTheme.typography.headlineMedium, color = Ink)
+                        Text("Текст, логика и материалы — в одном блоке", style = MaterialTheme.typography.bodySmall, color = Ink.copy(.58f))
+                    }
+                }
             }
             item {
                 OutlinedTextField(
@@ -1357,7 +1687,7 @@ private fun StepEditSheet(
                                         options.clear()
                                         options.addAll(listOf("Да", "Нет"))
                                     } else if (kind.contains("вариант") && options.isEmpty()) {
-                                        options.addAll(listOf("Вариант 1", "Вариант 2"))
+                                        options.addAll(listOf("", ""))
                                     }
                                 }
                                 .padding(horizontal = 11.dp, vertical = 8.dp),
@@ -1412,7 +1742,7 @@ private fun StepEditSheet(
                 }
                 if (!kind.contains("Условие")) {
                     item {
-                        OutlinedButton(onClick = { options.add("Новый вариант") }, shape = RoundedCornerShape(9.dp), modifier = Modifier.fillMaxWidth().height(42.dp)) {
+                        OutlinedButton(onClick = { options.add("") }, shape = RoundedCornerShape(9.dp), modifier = Modifier.fillMaxWidth().height(42.dp)) {
                             Icon(Icons.Outlined.Add, null, modifier = Modifier.size(17.dp))
                             Spacer(Modifier.size(6.dp))
                             Text("Вариант")
@@ -1536,7 +1866,7 @@ private fun StepEditSheet(
                     onClick = {
                         onSave(
                             step.copy(
-                                title = title.trim().ifBlank { "Без названия" },
+                                title = title.trim(),
                                 description = description.trim(),
                                 note = note.trim(),
                                 kind = kind,
@@ -1544,9 +1874,10 @@ private fun StepEditSheet(
                                 checklistItems = if (kind == "Чек-лист") checklistItems.map(String::trim).filter(String::isNotBlank) else emptyList(),
                                 options = when {
                                     kind.contains("Условие") -> listOf("Да", "Нет")
-                                    kind == "Один вариант" -> options.map(String::trim).filter(String::isNotBlank)
-                                        .ifEmpty { listOf("Вариант 1", "Вариант 2") }
-                                    kind.contains("вариант") -> options.map(String::trim).filter(String::isNotBlank)
+                                    kind == "Один вариант" -> options.map(String::trim).let { values ->
+                                        if (values.isEmpty()) listOf("", "") else values
+                                    }
+                                    kind.contains("вариант") -> options.map(String::trim)
                                     else -> emptyList()
                                 },
                                 timerSeconds = if (kind == "Таймер") timerSeconds.coerceAtLeast(1) else 300,
@@ -1606,35 +1937,52 @@ private fun TimerWheelPicker(totalSeconds: Int, onDurationChange: (Int) -> Unit)
     val minutes = (safeTotal % 3_600) / 60
     val seconds = safeTotal % 60
 
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
+            .clip(RoundedCornerShape(16.dp))
+            .background(Ink)
+            .padding(12.dp),
     ) {
-        NumberWheel(
-            label = "ч",
-            values = 0..23,
-            selected = hours,
-            onSelected = { onDurationChange((it * 3_600 + minutes * 60 + seconds).coerceAtLeast(1)) },
-            modifier = Modifier.weight(1f),
-        )
-        NumberWheel(
-            label = "мин",
-            values = 0..59,
-            selected = minutes,
-            onSelected = { onDurationChange((hours * 3_600 + it * 60 + seconds).coerceAtLeast(1)) },
-            modifier = Modifier.weight(1f),
-        )
-        NumberWheel(
-            label = "сек",
-            values = 0..59,
-            selected = seconds,
-            onSelected = { onDurationChange((hours * 3_600 + minutes * 60 + it).coerceAtLeast(1)) },
-            modifier = Modifier.weight(1f),
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(30.dp).clip(RoundedCornerShape(8.dp)).background(Lime), contentAlignment = Alignment.Center) {
+                Text("◷", style = MaterialTheme.typography.titleMedium, color = Ink)
+            }
+            Spacer(Modifier.size(9.dp))
+            Text("Таймер", style = MaterialTheme.typography.titleMedium, color = Color.White)
+            Spacer(Modifier.weight(1f))
+            Text(
+                "%02d:%02d:%02d".format(hours, minutes, seconds),
+                style = MaterialTheme.typography.titleLarge,
+                color = Lime,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+            NumberWheel(
+                label = "часы",
+                values = 0..23,
+                selected = hours,
+                onSelected = { onDurationChange((it * 3_600 + minutes * 60 + seconds).coerceAtLeast(1)) },
+                modifier = Modifier.weight(1f),
+            )
+            Text(":", style = MaterialTheme.typography.headlineMedium, color = Color.White.copy(.45f))
+            NumberWheel(
+                label = "минуты",
+                values = 0..59,
+                selected = minutes,
+                onSelected = { onDurationChange((hours * 3_600 + it * 60 + seconds).coerceAtLeast(1)) },
+                modifier = Modifier.weight(1f),
+            )
+            Text(":", style = MaterialTheme.typography.headlineMedium, color = Color.White.copy(.45f))
+            NumberWheel(
+                label = "секунды",
+                values = 0..59,
+                selected = seconds,
+                onSelected = { onDurationChange((hours * 3_600 + minutes * 60 + it).coerceAtLeast(1)) },
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 
@@ -1675,8 +2023,9 @@ private fun NumberWheel(
                 Modifier
                     .fillMaxWidth()
                     .height(44.dp)
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(MaterialTheme.colorScheme.surface),
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(Color.White.copy(.1f))
+                    .border(1.dp, Lime.copy(.65f), RoundedCornerShape(9.dp)),
             )
             LazyColumn(
                 state = listState,
@@ -1689,29 +2038,65 @@ private fun NumberWheel(
                     Text(
                         text = "%02d".format(value),
                         style = if (value == selected) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(if (value == selected) 1f else .35f),
+                        color = Color.White.copy(if (value == selected) 1f else .3f),
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth().height(44.dp).padding(top = 9.dp),
                     )
                 }
             }
         }
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(.55f))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = Lime.copy(.82f))
     }
 }
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
-private fun DecisionNode(step: DraftStep, onClick: () -> Unit, onLongClick: () -> Unit, onDelete: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun DecisionNode(
+    step: DraftStep,
+    onClick: () -> Unit,
+    isDragging: Boolean,
+    dragOffset: Offset,
+    onDragStart: (Offset) -> Unit,
+    onDrag: (Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var centerInRoot by remember(step.id) { mutableStateOf(Offset.Zero) }
+    val lift by animateFloatAsState(if (isDragging) 1.045f else 1f, label = "decision-lift")
+    Box(Modifier.fillMaxWidth(.82f)) {
+        if (isDragging) {
+            Box(
+                Modifier.matchParentSize().clip(RoundedCornerShape(12.dp))
+                    .background(Lavender.copy(.16f)).border(2.dp, Lavender, RoundedCornerShape(12.dp)),
+            )
+        }
         Box(
-            modifier = Modifier.fillMaxWidth(.82f).clip(RoundedCornerShape(12.dp)).background(Lavender)
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(12.dp),
+            modifier = Modifier.fillMaxWidth().zIndex(if (isDragging) 8f else 0f)
+                .onGloballyPositioned { centerInRoot = it.boundsInRoot().center }
+                .graphicsLayer {
+                    translationX = if (isDragging) dragOffset.x else 0f
+                    translationY = if (isDragging) dragOffset.y else 0f
+                    scaleX = lift
+                    scaleY = lift
+                    shadowElevation = if (isDragging) 22f else 0f
+                }
+                .clip(RoundedCornerShape(12.dp)).background(Lavender)
+                .clickable(onClick = onClick)
+                .pointerInput(step.id) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { onDragStart(centerInRoot) },
+                        onDragCancel = onDragCancel,
+                        onDragEnd = onDragEnd,
+                        onDrag = { change, amount -> change.consume(); onDrag(amount) },
+                    )
+                }
+                .padding(12.dp),
         ) {
             Column(Modifier.align(Alignment.Center)) {
                 Text("УСЛОВИЕ", style = MaterialTheme.typography.labelMedium, color = Ink.copy(.55f))
                 Spacer(Modifier.height(5.dp))
-                Text(step.title, style = MaterialTheme.typography.titleLarge, color = Ink)
+                Text(step.title.ifBlank { "Без названия" }, style = MaterialTheme.typography.titleLarge, color = Ink)
             }
             IconButton(onClick = onDelete, modifier = Modifier.align(Alignment.TopEnd).size(24.dp)) {
                 Icon(Icons.Outlined.Close, "Удалить условие", tint = Color(0xFFE53935), modifier = Modifier.size(14.dp))

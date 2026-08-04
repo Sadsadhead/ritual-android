@@ -27,7 +27,7 @@ class GenerationNotifier(private val context: Context) {
 
     fun showProgress(stage: String) = notify(
         NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.app_icon)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Создаю алгоритм")
             .setContentText(stage)
             .setProgress(0, 0, true)
@@ -39,9 +39,12 @@ class GenerationNotifier(private val context: Context) {
 
     fun showComplete(title: String) = notify(
         NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.app_icon)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Алгоритм готов")
             .setContentText(title)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setAutoCancel(true)
             .setContentIntent(openAppIntent())
             .build(),
@@ -49,9 +52,11 @@ class GenerationNotifier(private val context: Context) {
 
     fun showError(message: String) = notify(
         NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.app_icon)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Не удалось создать алгоритм")
             .setContentText(message)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setAutoCancel(true)
             .setContentIntent(openAppIntent())
             .build(),
@@ -70,13 +75,15 @@ class GenerationNotifier(private val context: Context) {
 
     private fun openAppIntent(): PendingIntent = PendingIntent.getActivity(
         context,
-        0,
-        Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        6203,
+        Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(MainActivity.EXTRA_DESTINATION, MainActivity.DESTINATION_AI),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
     private companion object {
-        const val CHANNEL_ID = "algorithm_generation"
-        const val NOTIFICATION_ID = 4107
+        const val CHANNEL_ID = GenerationKeepAliveService.CHANNEL_ID
+        const val NOTIFICATION_ID = GenerationKeepAliveService.NOTIFICATION_ID
     }
 }

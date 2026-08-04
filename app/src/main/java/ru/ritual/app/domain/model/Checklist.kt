@@ -3,44 +3,51 @@ package ru.ritual.app.domain.model
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Immutable
 
-enum class StepType { Information, Checkbox, YesNo, SingleChoice, MultipleChoice, Timer, Final }
+enum class StepType { Information, Warning, Checkbox, YesNo, SingleChoice, MultipleChoice, Timer, Final }
 
 enum class AttachmentType { Photo, VideoCircle, Audio, File }
 
 enum class GenerationCharacter(
+    val symbol: String,
     val title: String,
     val description: String,
     val instruction: String,
 ) {
     Balanced(
-        "Сбалансированный",
-        "Понятно, практично и без лишней формальности.",
-        "Пиши ясно и практично, сохраняя нейтральный доброжелательный тон.",
+        "◎",
+        "Навигатор",
+        "Спокойный баланс деталей, проверок и ясных действий.",
+        "Пиши как опытный навигатор: ясно, практично и последовательно. Балансируй краткость, полезные проверки и объяснения.",
     ),
     Official(
-        "Официальный",
-        "Строгие формулировки, однозначные требования и проверки.",
-        "Используй официальный деловой стиль, точные формулировки и явные критерии выполнения.",
+        "▤",
+        "Регламент",
+        "Строго, однозначно, с критериями готовности.",
+        "Создай строгий регламент: точные формулировки, явные критерии выполнения, контрольные точки и минимум двусмысленности.",
     ),
     Technical(
-        "Технический",
-        "Больше параметров, условий, измеримых значений и диагностики.",
-        "Пиши как технический регламент: добавляй параметры, измеримые значения, проверки и диагностику ошибок.",
+        "⌘",
+        "Инженер",
+        "Параметры, диагностика, условия и обработка ошибок.",
+        "Проектируй как инженер: добавляй измеримые параметры, зависимости, диагностику ошибок, предупреждения и безопасные варианты восстановления.",
     ),
     Friendly(
-        "Дружелюбный",
-        "Мягкие объяснения, поддержка и простой разговорный язык.",
-        "Пиши дружелюбно и спокойно, объясняй простыми словами и поддерживай пользователя.",
+        "☀",
+        "Наставник",
+        "Мягко объясняет и помогает не потерять уверенность.",
+        "Пиши как заботливый наставник: простыми словами, без давления, с короткими подсказками и поддержкой в сложных местах.",
     ),
     Concise(
-        "Лаконичный",
-        "Минимум текста — только необходимые действия и решения.",
-        "Будь предельно лаконичен: оставляй только необходимые действия, условия и предупреждения.",
+        "⚡",
+        "Спринт",
+        "Самый короткий безопасный путь к результату.",
+        "Оптимизируй под скорость: только необходимые действия, решения и критические предупреждения; убирай повторы и лишние пояснения.",
     ),
     Creative(
-        "Креативный",
-        "Необычная подача и запоминающиеся названия без потери точности.",
-        "Используй живую запоминающуюся подачу и образные названия, не жертвуя точностью и безопасностью.",
+        "✦",
+        "Сценарист",
+        "Живая подача и запоминающийся маршрут без потери точности.",
+        "Построй запоминающийся сценарий с живыми названиями и уместными образами, но сохрани точность, безопасность и реальную логику ветвлений.",
     ),
 }
 
@@ -82,6 +89,29 @@ data class Checklist(
     val tags: List<String> = emptyList(),
 )
 
+@Immutable
+data class AlgorithmSuggestion(
+    val checklist: Checklist,
+    val reason: String,
+)
+
+@Immutable
+data class ActiveAlgorithmRun(
+    val algorithmId: String,
+    val title: String,
+    val emoji: String,
+    val accentArgb: Int,
+    val currentStepIndex: Int,
+    val totalSteps: Int,
+    val startedAtMillis: Long,
+    val completedSteps: Int = 1,
+    val minTotalSteps: Int = totalSteps,
+    val maxTotalSteps: Int = totalSteps,
+    val minPercent: Int = 0,
+    val maxPercent: Int = 0,
+    val visitedStepIds: List<String> = emptyList(),
+)
+
 enum class MetadataTarget { Title, Description, Classification }
 
 @Immutable
@@ -98,6 +128,16 @@ data class AppPreferences(
     val keepScreenAwake: Boolean = false,
     val autoPlayVideoNotes: Boolean = false,
     val generationNotifications: Boolean = true,
+    val calendarWeekStartsMonday: Boolean = true,
+    val calendarDefaultView: ScheduleViewMode = ScheduleViewMode.Month,
+    val calendarShowNotes: Boolean = true,
+    val calendarOfferSystemExport: Boolean = true,
+    val showActiveRunOnHome: Boolean = true,
+    val showProgressRange: Boolean = true,
+    val confirmBeforeStopping: Boolean = true,
+    val compactAlgorithmCards: Boolean = true,
+    val calendarShowWeekNumbers: Boolean = true,
+    val calendarHighlightCurrentWeek: Boolean = true,
 )
 
 @Immutable

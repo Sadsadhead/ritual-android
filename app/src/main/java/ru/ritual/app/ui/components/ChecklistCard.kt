@@ -2,6 +2,8 @@ package ru.ritual.app.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -21,16 +23,23 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.Icon
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -50,17 +59,22 @@ import ru.ritual.app.domain.model.Checklist
 import ru.ritual.app.ui.theme.Ink
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun ChecklistCard(
     checklist: Checklist,
     onClick: () -> Unit,
     onEdit: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
+    onToggleFavorite: (() -> Unit)? = null,
+    onDuplicate: (() -> Unit)? = null,
+    compact: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val hasActions = onEdit != null || onDelete != null
-    val revealWidth = 116.dp
+    val revealWidth = 104.dp
     val revealPx = with(LocalDensity.current) { revealWidth.toPx() }
     var offsetX by remember(checklist.id) { mutableFloatStateOf(0f) }
+    var showMenu by remember(checklist.id) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val dragState = rememberDraggableState { delta ->
         if (hasActions) offsetX = (offsetX + delta).coerceIn(-revealPx, 0f)
@@ -81,8 +95,8 @@ fun ChecklistCard(
 
     Box(
         modifier = modifier
-            .height(130.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .height(if (compact) 90.dp else 108.dp)
+            .clip(RoundedCornerShape(13.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Row(
@@ -90,7 +104,7 @@ fun ChecklistCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                modifier = Modifier.weight(1f).fillMaxHeight().clickable {
+                modifier = Modifier.weight(1f).fillMaxHeight().clickable(enabled = offsetX <= -revealPx * .55f) {
                     offsetX = 0f
                     onEdit?.invoke()
                 },
@@ -99,7 +113,7 @@ fun ChecklistCard(
                 Icon(Icons.Outlined.Edit, "Редактировать", tint = Ink)
             }
             Box(
-                modifier = Modifier.weight(1f).fillMaxHeight().background(Color(0xFFFFD9D7)).clickable {
+                modifier = Modifier.weight(1f).fillMaxHeight().background(Color(0xFFFFD9D7)).clickable(enabled = offsetX <= -revealPx * .55f) {
                     offsetX = 0f
                     onDelete?.invoke()
                 },
@@ -120,45 +134,33 @@ fun ChecklistCard(
                 enabled = hasActions,
                 onDragStopped = { velocity -> settle(velocity) },
             )
-            .clickable {
-                if (offsetX < -1f) settle(0f) else onClick()
-            }
-            .padding(8.dp),
+            .combinedClickable(
+                onClick = { if (offsetX < -1f) settle(0f) else onClick() },
+                onLongClick = { if (offsetX >= -1f) showMenu = true },
+            )
+            .padding(7.dp),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxHeight()
-                .width(88.dp)
-                .clip(RoundedCornerShape(11.dp))
+                .width(if (compact) 64.dp else 76.dp)
+                .clip(RoundedCornerShape(9.dp))
                 .background(checklist.accent),
         ) {
             Text(
                 text = checklist.emoji,
-                style = MaterialTheme.typography.headlineLarge,
+                style = MaterialTheme.typography.headlineMedium,
                 color = Ink,
                 modifier = Modifier.align(Alignment.Center),
             )
-            Text(
-                checklist.category.uppercase(),
-                style = MaterialTheme.typography.labelMedium,
-                color = Ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .padding(6.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color.White.copy(alpha = .78f))
-                    .padding(horizontal = 6.dp, vertical = 3.dp)
-                    .align(Alignment.BottomStart),
-            )
         }
-        Spacer(Modifier.width(11.dp))
+        Spacer(Modifier.width(9.dp))
         Column(Modifier.weight(1f).fillMaxHeight()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     checklist.title,
-                    style = MaterialTheme.typography.titleLarge,
-                    maxLines = 2,
+                    style = if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
@@ -171,18 +173,18 @@ fun ChecklistCard(
                     )
                 }
             }
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(2.dp))
             Text(
                 checklist.description,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f),
-                maxLines = if (checklist.tags.isEmpty()) 2 else 1,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             if (checklist.tags.isNotEmpty()) {
                 Text(
-                    checklist.tags.take(3).joinToString("  ") { "#$it" },
-                    style = MaterialTheme.typography.labelMedium,
+                    checklist.tags.take(2).joinToString("  ") { "#$it" },
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -207,7 +209,7 @@ fun ChecklistCard(
                 )
                 Spacer(Modifier.weight(1f))
                 Box(
-                    modifier = Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).background(Ink),
+                    modifier = Modifier.size(26.dp).clip(RoundedCornerShape(7.dp)).background(Ink).clickable(onClick = onClick),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowForward, "Открыть", tint = Color.White, modifier = Modifier.size(15.dp))
@@ -215,5 +217,43 @@ fun ChecklistCard(
             }
         }
     }
+        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            DropdownMenuItem(
+                text = { Text("Запустить") },
+                leadingIcon = { Icon(Icons.Outlined.PlayArrow, null) },
+                onClick = { showMenu = false; onClick() },
+            )
+            onEdit?.let { edit ->
+                DropdownMenuItem(
+                    text = { Text("Изменить") },
+                    leadingIcon = { Icon(Icons.Outlined.Edit, null) },
+                    onClick = { showMenu = false; edit() },
+                )
+            }
+            onToggleFavorite?.let { toggle ->
+                DropdownMenuItem(
+                    text = { Text(if (checklist.isFavorite) "Убрать из избранного" else "В избранное") },
+                    leadingIcon = {
+                        Icon(if (checklist.isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, null)
+                    },
+                    onClick = { showMenu = false; toggle() },
+                )
+            }
+            onDuplicate?.let { duplicate ->
+                DropdownMenuItem(
+                    text = { Text("Дублировать") },
+                    leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) },
+                    onClick = { showMenu = false; duplicate() },
+                )
+            }
+            if (onDelete != null) HorizontalDivider()
+            onDelete?.let { delete ->
+                DropdownMenuItem(
+                    text = { Text("Удалить", color = Color(0xFFB3261E)) },
+                    leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, tint = Color(0xFFB3261E)) },
+                    onClick = { showMenu = false; delete() },
+                )
+            }
+        }
     }
 }

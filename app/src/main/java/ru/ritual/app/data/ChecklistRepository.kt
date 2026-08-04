@@ -202,7 +202,7 @@ class ChecklistRepository(context: Context) {
                                 type = runCatching { StepType.valueOf(step.optString("type")) }.getOrDefault(StepType.Checkbox),
                                 timerSeconds = step.optInt("timerSeconds", 0).takeIf { it > 0 },
                                 checklistItems = step.optJSONArray("checklistItems").toStringList(),
-                                options = step.optJSONArray("options").toStringList(),
+                                options = step.optJSONArray("options").toOptionList(),
                                 note = step.optString("note"),
                                 parentConditionId = step.optString("parentConditionId")
                                     .takeIf { it.isNotBlank() && it != "null" },
@@ -245,6 +245,11 @@ class ChecklistRepository(context: Context) {
     private fun JSONArray?.toStringList(): List<String> = buildList {
         val source = this@toStringList ?: return@buildList
         for (index in 0 until source.length()) source.optString(index).takeIf(String::isNotBlank)?.let(::add)
+    }
+
+    private fun JSONArray?.toOptionList(): List<String> = buildList {
+        val source = this@toOptionList ?: return@buildList
+        for (index in 0 until source.length()) add(source.optString(index))
     }
 
     private companion object {
